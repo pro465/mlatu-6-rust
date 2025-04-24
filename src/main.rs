@@ -45,7 +45,7 @@ impl Thing {
     }
 }
 
-const NUM_OPERS: u128 = 6;
+const NUM_OPERS: u128 = 5;
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, strum::EnumString, strum::EnumIter, strum::Display,
@@ -74,11 +74,11 @@ impl Oper {
         use Oper::*;
         match num {
             0 => Dupe,
-            1 => Delete,
-            2 => Swap,
-            3 => Concat,
-            4 => Nest,
-            5 => Unnest,
+            //1 => Delete,
+            1 => Swap,
+            2 => Concat,
+            3 => Nest,
+            4 => Unnest,
             _ => unreachable!(),
         }
     }
@@ -199,24 +199,52 @@ fn reduce(input: Vec<Thing>, mut lim: u64) -> Result<Vec<Thing>, OperError> {
     Ok(result)
 }
 
+fn filter(p: &Term) -> bool {
+    let twocombs = &[
+        (Thing::Oper(Oper::Concat), Thing::Oper(Oper::Delete)),
+        (Thing::Oper(Oper::Dupe), Thing::Oper(Oper::Swap)),
+        (Thing::Oper(Oper::Nest), Thing::Oper(Oper::Delete)),
+        (Thing::Oper(Oper::Nest), Thing::Oper(Oper::Unnest)),
+        (Thing::Oper(Oper::Dupe), Thing::Oper(Oper::Delete)),
+        (Thing::Oper(Oper::Swap), Thing::Oper(Oper::Swap)),
+    ];
+
+    for i in 0..p.len() {
+        if i+1 >= p.len(){
+            break
+        }
+        if twocombs.iter().any(|(x, y)| *x == p[i] && *y == p[i+1]) {
+            return false;
+        }
+    }
+    for i in p.iter() {
+        if let Thing::Quote(v) = i {
+            if !filter(v) {
+                return false
+            }
+        }
+    }
+    true
+}
+
 fn convert(mut num: u128, c: bool) -> (Term, u128) {
     let mut res = Vec::new();
     while num > 0 {
-        let modulo = if c { 2 } else { 3 };
-        let result = num % modulo + 3 - modulo;
+        let modulo = NUM_OPERS + if c { 1 } else { 2 };
+        let result = num % modulo + NUM_OPERS + 2 - modulo;
         num /= modulo;
 
         let node = match result {
             0 => break,
-            1 => {
-                let t = Thing::Oper(Oper::convert(num % NUM_OPERS));
-                num /= NUM_OPERS;
-                t
-            }
-            _ => {
+            x if x == NUM_OPERS + 1 => {
                 let (t, new_num) = convert(num, false);
                 num = new_num;
                 Thing::Quote(t)
+            }
+
+            _ => {
+                let t = Thing::Oper(Oper::convert(result - 1));
+                t
             }
         };
         res.push(node);
@@ -225,11 +253,28 @@ fn convert(mut num: u128, c: bool) -> (Term, u128) {
 }
 
 fn find(args: Term, exp_res: Term, lim: u64) {
+    let mut avg=0;
     for i in 0.. {
         let (prog, _) = convert(i, true);
+        avg += prog.iter()
+                    .map(|x|x.to_string().len()).sum::<usize>();
+        if i%10000==0 {
+            println!(
+                "avg. length={}, current program: '{}'",
+                avg as f64 / 10000.,
+                prog.iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .concat()
+            );
+            avg=0;
+        }
+
+        if !filter(&prog) { continue } 
         let mut full = args.clone();
         full.extend_from_slice(&prog);
         let Ok(res) = reduce(full, lim) else { continue };
+
         if res == exp_res {
             println!(
                 "{}",
@@ -251,12 +296,12 @@ fn main() {
         ],
         vec![
         Thing::Quote(vec![
-            Thing::Quote(vec![Thing::Char('B')]),
             Thing::Char('A'),
+            Thing::Quote(vec![Thing::Char('B')]),
         ]),
         Thing::Quote(vec![
-            Thing::Char('A'),
             Thing::Quote(vec![Thing::Char('B')]),
+            Thing::Char('A'),
         ]),
         ],
         50,
