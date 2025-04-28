@@ -45,7 +45,7 @@ impl Thing {
     }
 }
 
-const NUM_OPERS: u128 = 5;
+const NUM_OPERS: u128 = 6;
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, strum::EnumString, strum::EnumIter, strum::Display,
@@ -67,30 +67,30 @@ enum Oper {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 #[error("Not enough quotes.")]
-struct OperError;
+struct OperError(bool);
 
 impl Oper {
     pub fn convert(num: u128) -> Oper {
         use Oper::*;
         match num {
             0 => Dupe,
-            //1 => Delete,
             1 => Swap,
             2 => Concat,
             3 => Nest,
             4 => Unnest,
+            5 => Delete,
             _ => unreachable!(),
         }
     }
     pub fn operate(self, term: &mut Vec<Thing>) -> Result<Option<Vec<Thing>>, OperError> {
         if term.len() < self.arity() {
-            return Err(OperError);
+            return Err(OperError(false));
         }
         if term[term.len() - self.arity()..]
             .iter()
             .any(|t| t.as_quote().is_none())
         {
-            return Err(OperError);
+            return Err(OperError(false));
         }
         match self {
             Oper::Dupe => {
@@ -108,8 +108,9 @@ impl Oper {
                 Ok(None)
             }
             Oper::Concat => {
-                let mut new_quote = term.pop().unwrap().into_quote().unwrap().clone();
-                new_quote.extend(term.pop().unwrap().into_quote().unwrap());
+                let temp = term.pop().unwrap().into_quote().unwrap();
+                let mut new_quote = term.pop().unwrap().into_quote().unwrap();
+                new_quote.extend(temp);
                 term.push(Thing::Quote(new_quote));
                 Ok(None)
             }
@@ -157,15 +158,15 @@ fn show(result: &[Thing], stack: &[Vec<Thing>]) {
     println!();
 }
 
-fn reduce(input: Vec<Thing>, mut lim: u64) -> Result<Vec<Thing>, OperError> {
+fn reduce<const C: bool>(input: Vec<Thing>, mut lim: u64) -> Result<Vec<Thing>, OperError> {
     let mut result = Vec::new();
     let mut stack = vec![input];
     stack[0].reverse();
 
     while !stack.is_empty() && lim > 0 {
         lim-=1;
-        if lim==0 { return Err(OperError); }
-        //show(&result, &stack);
+        if lim==0 { return Err(OperError(true)); }
+        if C { show(&result, &stack); }
 
         let mut piece = stack.pop().unwrap();
         let Some(next) = piece.pop() else {
@@ -195,7 +196,7 @@ fn reduce(input: Vec<Thing>, mut lim: u64) -> Result<Vec<Thing>, OperError> {
         }
     }
 
-    //show(&result, &stack);
+    if C { show(&result, &stack); }
     Ok(result)
 }
 
@@ -210,27 +211,28 @@ fn filter(p: &Term) -> bool {
     ];
 
     for i in 0..p.len() {
-        if i+1 >= p.len(){
+        if i+1 >= p.len() {
             break
         }
         if twocombs.iter().any(|(x, y)| *x == p[i] && *y == p[i+1]) {
             return false;
         }
     }
-    for i in p.iter() {
-        if let Thing::Quote(v) = i {
+    for x in p.iter() {
+        if let Thing::Quote(v) = x {
             if !filter(v) {
-                return false
+                return false;
             }
         }
     }
     true
 }
 
+
 fn convert(mut num: u128, c: bool) -> (Term, u128) {
     let mut res = Vec::new();
+    let modulo = NUM_OPERS + if c { 1 } else { 2 };
     while num > 0 {
-        let modulo = NUM_OPERS + if c { 1 } else { 2 };
         let result = num % modulo + NUM_OPERS + 2 - modulo;
         num /= modulo;
 
@@ -256,7 +258,7 @@ fn find(args: Term, exp_res: Term, lim: u64) {
     let mut avg=0;
     for i in 0.. {
         let (prog, _) = convert(i, true);
-        avg += prog.iter()
+        /*avg += prog.iter()
                     .map(|x|x.to_string().len()).sum::<usize>();
         if i%10000==0 {
             println!(
@@ -268,12 +270,12 @@ fn find(args: Term, exp_res: Term, lim: u64) {
                     .concat()
             );
             avg=0;
-        }
+        }*/
 
         if !filter(&prog) { continue } 
         let mut full = args.clone();
         full.extend_from_slice(&prog);
-        let Ok(res) = reduce(full, lim) else { continue };
+        let Ok(res) = reduce::<false>(full, lim) else { continue };
 
         if res == exp_res {
             println!(
@@ -283,27 +285,47 @@ fn find(args: Term, exp_res: Term, lim: u64) {
                     .collect::<Vec<_>>()
                     .concat()
             );
-            break;
+            let mut full = args.clone();
+            full.extend_from_slice(&prog);
+            reduce::<true>(full, lim);
+            //break;
+        }
+    }
+}
+
+
+fn nonhalting(n: u64) {
+    for i in 0.. {
+        let (prog, _) = convert(i, true);
+        if let Err(OperError(true)) = reduce::<false>(prog.clone(), n) {
+            println!(
+                "{}",
+                prog.iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .concat()
+            );
         }
     }
 }
 
 fn main() {
-    find(
+    nonhalting(100);
+    /*find(
         vec![
             Thing::Quote(vec![Thing::Char('B')]),
             Thing::Quote(vec![Thing::Char('A')]),
         ],
         vec![
-        Thing::Quote(vec![
-            Thing::Char('A'),
-            Thing::Quote(vec![Thing::Char('B')]),
-        ]),
-        Thing::Quote(vec![
+            Thing::Quote(vec![
             Thing::Quote(vec![Thing::Char('B')]),
             Thing::Char('A'),
-        ]),
+            ]),
+            //Thing::Char('A'),
+            Thing::Quote(vec![Thing::Char('B')]),
+            //Thing::Quote(vec![Thing::Char('C')]),
+            //Thing::Char('A'),
         ],
-        50,
-    );
+         50,
+    );*/
 }
