@@ -135,40 +135,61 @@ impl Oper {
     }
 }
 
-fn show(result: &[Thing], stack: &[Vec<Thing>]) {
-    print!(
-        "{}",
-        result
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .concat()
-    );
+fn to_str(result: &[Thing], stack: &[Vec<Thing>]) -> String {
+    let mut s = result
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .concat();
     for piece in stack.iter().rev() {
-        print!(
-            "{}",
-            piece
-                .iter()
-                .rev()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .concat()
-        );
+        s.extend(piece.iter().rev().map(ToString::to_string));
     }
-    println!();
+    s
 }
 
-fn reduce<const C: bool>(input: Vec<Thing>, mut lim: u64) -> Result<Vec<Thing>, OperError> {
+fn decide(log: &[String]) -> bool {
+    let s = log.last().unwrap();
+    let i = log.len();
+    if log[..i - 1]
+        .iter()
+        .any(|x| s.ends_with(x) || s.starts_with(x))
+    {
+        return true;
+    }
+    let last4 = &log[i-4..];
+    let last4 = [last4[0].len(),last4[1].len(),last4[2].len(),last4[3].len()];
+    if last4[0] < last4[1] && last4[2] < last4[3] {
+    let (da, db) = (last4[1] - last4[0], last4[3] - last4[2]);
+    if da == db {
+        return true;
+    }}
+    false
+}
+
+fn reduce<const C: bool>(
+    input: Vec<Thing>,
+    mut lim: u64,
+    memlim: usize,
+) -> Result<Vec<Thing>, OperError> {
     let mut result = Vec::new();
     let mut stack = vec![input];
+    let mut log = Vec::new();
     stack[0].reverse();
+    let mut flag = false;
 
-    while !stack.is_empty() && lim > 0 {
-        lim-=1;
-        if lim==0 { return Err(OperError(true)); }
-        if C { show(&result, &stack); }
-
+    while !stack.is_empty() {
+        lim -= 1;
+        let s = to_str(&result, &stack);
+        if C {
+            println!("{}", &s);
+        }
         let mut piece = stack.pop().unwrap();
+        if lim == 0 || piece.iter().map(|x| x.to_string().len()).sum::<usize>() > memlim {
+            flag = true;
+            break;
+        }
+
+        log.push(s);
         let Some(next) = piece.pop() else {
             continue;
         };
@@ -196,7 +217,17 @@ fn reduce<const C: bool>(input: Vec<Thing>, mut lim: u64) -> Result<Vec<Thing>, 
         }
     }
 
-    if C { show(&result, &stack); }
+    if C {
+        println!("{}", to_str(&result, &stack));
+    }
+
+    if flag {
+        if decide(&log) {
+            return Err(OperError(false));
+        }
+        if C { println!("{:?}", log.iter().map(String::len).collect::<Vec<_>>()); }
+        return Err(OperError(true));
+    }
     Ok(result)
 }
 
@@ -211,10 +242,10 @@ fn filter(p: &Term) -> bool {
     ];
 
     for i in 0..p.len() {
-        if i+1 >= p.len() {
-            break
+        if i + 1 >= p.len() {
+            break;
         }
-        if twocombs.iter().any(|(x, y)| *x == p[i] && *y == p[i+1]) {
+        if twocombs.iter().any(|(x, y)| *x == p[i] && *y == p[i + 1]) {
             return false;
         }
     }
@@ -228,11 +259,10 @@ fn filter(p: &Term) -> bool {
     true
 }
 
-
 fn convert(mut num: u128, c: bool) -> (Term, u128) {
     let mut res = Vec::new();
     let modulo = NUM_OPERS + if c { 1 } else { 2 };
-    while num > 0 {
+    while num > modulo {
         let result = num % modulo + NUM_OPERS + 2 - modulo;
         num /= modulo;
 
@@ -254,8 +284,8 @@ fn convert(mut num: u128, c: bool) -> (Term, u128) {
     (res, num)
 }
 
-fn find(args: Term, exp_res: Term, lim: u64) {
-    let mut avg=0;
+fn find(args: Term, exp_res: Term, lim: u64, memlim: usize) {
+    let mut avg = 0;
     for i in 0.. {
         let (prog, _) = convert(i, true);
         /*avg += prog.iter()
@@ -272,10 +302,12 @@ fn find(args: Term, exp_res: Term, lim: u64) {
             avg=0;
         }*/
 
-        if !filter(&prog) { continue } 
+        if !filter(&prog) {
+            continue;
+        }
         let mut full = args.clone();
         full.extend_from_slice(&prog);
-        let Ok(res) = reduce::<false>(full, lim) else { continue };
+        let Ok(res) = reduce::<false>(full, lim, memlim) else { continue };
 
         if res == exp_res {
             println!(
@@ -287,17 +319,19 @@ fn find(args: Term, exp_res: Term, lim: u64) {
             );
             let mut full = args.clone();
             full.extend_from_slice(&prog);
-            reduce::<true>(full, lim);
+            reduce::<true>(full, lim, memlim);
             //break;
         }
     }
 }
 
-
-fn nonhalting(n: u64) {
+fn nonhalting(n: u64, memlim: usize) {
     for i in 0.. {
         let (prog, _) = convert(i, true);
-        if let Err(OperError(true)) = reduce::<false>(prog.clone(), n) {
+        if !filter(&prog) {
+            continue;
+        }
+        if let Err(OperError(true)) = reduce::<false>(prog.clone(), n, memlim) {
             println!(
                 "{}",
                 prog.iter()
@@ -309,8 +343,33 @@ fn nonhalting(n: u64) {
     }
 }
 
+fn halting_random(low: u64, high: u64, memlim: usize) {
+    let mut c=0;
+    loop {
+        let i = rand::random::<u128>();
+        let (prog, _) = convert(i, true);
+        if !filter(&prog) {
+            continue;
+        }
+        if let Err(OperError(true)) = reduce::<false>(prog.clone(), low, memlim) {
+            if let Ok(_) = reduce::<false>(prog.clone(), high, memlim) {
+            println!(
+                "{c}: {}",
+                prog.iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .concat()
+            );
+            reduce::<true>(prog, low, memlim);
+            let _ = std::io::stdin().read_line(&mut String::new());
+            }
+        }
+        c+=1;
+    }
+}
+
 fn main() {
-    nonhalting(100);
+    halting_random(100, 1000, 2000);
     /*find(
         vec![
             Thing::Quote(vec![Thing::Char('B')]),
